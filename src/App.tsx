@@ -1,16 +1,9 @@
+import "./styles.css";
 import { useControls } from "leva";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-// https://oeis.org/A008458
-const hexLatticeNumbers = [
-  1, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60, 66, 72, 78, 84, 90, 96, 102, 108,
-  114, 120, 126, 132, 138, 144, 150, 156, 162, 168, 174, 180, 186, 192, 198,
-  204, 210, 216, 222, 228, 234, 240, 246, 252, 258, 264, 270, 276, 282, 288,
-  294, 300, 306, 312, 318, 324, 330, 336, 342, 348,
-];
-
-const MODES = ["sunflower", "sunflowerGeodesic", "hexLattice"] as const;
+const MODES = ["sunflower", "sunflowerGeodesic", "lattice"] as const;
 type GenMode = (typeof MODES)[number];
 
 // H/T https://stackoverflow.com/questions/28567166/uniformly-distribute-x-points-inside-a-circle
@@ -28,23 +21,26 @@ interface GenProps {
   mode: GenMode;
   size: number;
   layers: number;
+  nPerLayer: number;
   twist: number;
 }
 
-function roundFloat(val: number) {
-  return parseFloat(val.toFixed(2));
+function roundFloat(val: number, prec: number = 2) {
+  return parseFloat(val.toFixed(prec));
 }
+
+type PointArray = Array<[number, number]>;
 
 function generateSunflowerPoints(
   n: number,
   alpha: number,
   geodesic: boolean,
   size: number,
-): Array<[number, number]> {
+): PointArray {
   const phi = (1 + Math.sqrt(5)) / 2;
   const angleStride = geodesic ? 360 * phi : (2 * Math.PI) / phi ** 2;
   const b = Math.round(alpha * Math.sqrt(n));
-  const points: Array<[number, number]> = [];
+  const points: PointArray = [];
   for (let k = 1; k <= n; k++) {
     const r = radius(k, n, b) * (size / 2);
     const theta = k * angleStride;
@@ -55,22 +51,22 @@ function generateSunflowerPoints(
   return points;
 }
 
-function generateHexLatticePoints({
+function generateLatticePoints({
+  n,
   size,
   layers,
+  nPerLayer,
   twist,
 }: {
+  n: number;
   size: number;
   layers: number;
+  nPerLayer: number;
   twist: number;
 }) {
-  const points: Array<[number, number]> = [];
-  // Generate up to `n` evenly distributed points inside a circle,
-  // so there are `layers` concentric circles of them
-  // with one point always in the middle.
+  const points: PointArray = [];
   for (let layer = 0; layer < layers; layer++) {
-    const pointsPerLayer = hexLatticeNumbers[layer];
-    if (!pointsPerLayer) break;
+    const pointsPerLayer = 1 + layer * nPerLayer;
     const angleStride = (2 * Math.PI) / pointsPerLayer;
     const radius = (layer * size) / (2 * layers);
     for (let i = 0; i < pointsPerLayer; i++) {
@@ -80,10 +76,19 @@ function generateHexLatticePoints({
       points.push([roundFloat(x), roundFloat(y)]);
     }
   }
+  if (points.length > n) {
+    // Evenly remove points until we have the desired number.
+    const stride = Math.floor(points.length / n);
+    const newPoints: PointArray = [];
+    for (let i = 0; i < points.length; i += stride) {
+      newPoints.push(points[i]!);
+    }
+    return newPoints;
+  }
   return points;
 }
 
-function generatePoints(genProps: GenProps) {
+function generatePoints(genProps: GenProps): PointArray {
   switch (genProps.mode) {
     case "sunflower":
     case "sunflowerGeodesic":
@@ -93,10 +98,12 @@ function generatePoints(genProps: GenProps) {
         genProps.mode === "sunflowerGeodesic",
         genProps.size,
       );
-    case "hexLattice":
-      return generateHexLatticePoints({
+    case "lattice":
+      return generateLatticePoints({
+        n: genProps.n,
         size: genProps.size,
         layers: genProps.layers,
+        nPerLayer: genProps.nPerLayer,
         twist: genProps.twist,
       });
     default:
@@ -118,7 +125,7 @@ type StyleProps = {
 interface SunflowerDotsProps {
   radius: number;
   size: number;
-  genProps: GenProps;
+  points: PointArray;
   styleProps: StyleProps;
 }
 
@@ -156,18 +163,50 @@ function Dot({ radius, cx, cy, center, crosshair }: DotProps & StyleProps) {
 function DotArrangement({
   size,
   radius,
-  genProps,
+  points,
   styleProps,
 }: SunflowerDotsProps) {
   return (
     <svg viewBox={`0 0 ${size} ${size}`} width={size} height={size}>
       <g transform={`translate(${size / 2} ${size / 2})`}>
-        {generatePoints(genProps).map(([cx, cy], i) => (
+        {points.map(([cx, cy], i) => (
           <Dot key={i} cx={cx} cy={cy} radius={radius} {...styleProps} />
         ))}
       </g>
     </svg>
   );
+}
+
+function computePointStats(points: Readonly<PointArray>, size: number) {
+  // Compute the minimum distance of each point to any other point.
+  const distances = points.map((point, i) => {
+    let minDistance = Number.POSITIVE_INFINITY;
+    for (let j = 0; j < points.length; j++) {
+      if (i === j) continue;
+      const [x, y] = points[j]!;
+      const distance = Math.hypot(point[0] - x, point[1] - y) / size;
+      if (distance < minDistance) {
+        minDistance = distance;
+      }
+    }
+    return minDistance;
+  });
+  // Compute the average and median of the minimum distances.
+  const minimum = Math.min(...distances);
+  const maximum = Math.max(...distances);
+  const average = distances.reduce((a, b) => a + b, 0) / points.length;
+  const sorted = [...distances].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const maxDiffFromAverageNorm =
+    Math.max(...distances.map((distance) => Math.abs(distance - average))) /
+    average;
+  return {
+    average,
+    median,
+    minimum,
+    maximum,
+    maxDiffFromAverageNorm,
+  };
 }
 
 export default function App() {
@@ -183,14 +222,16 @@ export default function App() {
     size,
     svg,
     twist,
+    nPerLayer,
   } = useControls({
     mode: {
       options: MODES,
       value: "sunflower",
     },
-    n: { value: 50, min: 1, max: 1000, step: 1 },
+    n: { value: 50, min: 1, max: 2000, step: 1 },
     alpha: { value: 2, min: 0, max: 3, step: 0.01 },
-    layers: { value: 5, min: 1, max: hexLatticeNumbers.length, step: 1 },
+    layers: { value: 5, min: 1, max: 42, step: 1 },
+    nPerLayer: { value: 6, min: 0, max: 20, step: 0.1 },
     size: { value: 500, min: 10, max: 1000, step: 1 },
     radius: { value: 4.5, min: 0, max: 100, step: 0.1 },
     twist: { value: 0, min: 0, max: 0.5, step: 0.01 },
@@ -206,15 +247,18 @@ export default function App() {
     size,
     layers,
     twist,
+    nPerLayer,
   };
   if (adjustSizeToFitRadius) {
     genProps.size -= radius * 2;
   }
+  const points = generatePoints(genProps);
+  const pointStats = computePointStats(points, size);
   const styleProps = { center, crosshair };
   const comp = (
     <DotArrangement
       size={size}
-      genProps={genProps}
+      points={points}
       radius={radius}
       styleProps={styleProps}
     />
@@ -231,6 +275,8 @@ export default function App() {
       ) : (
         comp
       )}
+      <pre>{JSON.stringify(pointStats, null, 2)}</pre>
+      <br />
       <br />
       <a href="https://stackoverflow.com/a/28572551/51685">
         Sunflower algorithm source
