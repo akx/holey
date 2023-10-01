@@ -28,10 +28,11 @@ interface GenProps {
   mode: GenMode;
   size: number;
   layers: number;
+  twist: number;
 }
 
-function roundFloat(x: number) {
-  return parseFloat(x.toFixed(2));
+function roundFloat(val: number) {
+  return parseFloat(val.toFixed(2));
 }
 
 function generateSunflowerPoints(
@@ -54,7 +55,15 @@ function generateSunflowerPoints(
   return points;
 }
 
-function generateHexLatticePoints(n: number, size: number, layers: number) {
+function generateHexLatticePoints({
+  size,
+  layers,
+  twist,
+}: {
+  size: number;
+  layers: number;
+  twist: number;
+}) {
   const points: Array<[number, number]> = [];
   // Generate up to `n` evenly distributed points inside a circle,
   // so there are `layers` concentric circles of them
@@ -65,7 +74,7 @@ function generateHexLatticePoints(n: number, size: number, layers: number) {
     const angleStride = (2 * Math.PI) / pointsPerLayer;
     const radius = (layer * size) / (2 * layers);
     for (let i = 0; i < pointsPerLayer; i++) {
-      const theta = i * angleStride;
+      const theta = i * angleStride + twist * layer * Math.PI;
       const x = radius * Math.cos(theta);
       const y = radius * Math.sin(theta);
       points.push([roundFloat(x), roundFloat(y)]);
@@ -85,11 +94,11 @@ function generatePoints(genProps: GenProps) {
         genProps.size,
       );
     case "hexLattice":
-      return generateHexLatticePoints(
-        genProps.n,
-        genProps.size,
-        genProps.layers,
-      );
+      return generateHexLatticePoints({
+        size: genProps.size,
+        layers: genProps.layers,
+        twist: genProps.twist,
+      });
     default:
       return [];
   }
@@ -163,16 +172,17 @@ function DotArrangement({
 
 export default function App() {
   const {
-    n,
+    adjustSizeToFitRadius,
     alpha,
-    size,
-    radius,
-    svg,
     center,
     crosshair,
-    mode,
-    adjustSizeToFitRadius,
     layers,
+    mode,
+    n,
+    radius,
+    size,
+    svg,
+    twist,
   } = useControls({
     mode: {
       options: MODES,
@@ -183,12 +193,20 @@ export default function App() {
     layers: { value: 5, min: 1, max: hexLatticeNumbers.length, step: 1 },
     size: { value: 500, min: 10, max: 1000, step: 1 },
     radius: { value: 4.5, min: 0, max: 100, step: 0.1 },
+    twist: { value: 0, min: 0, max: 0.5, step: 0.01 },
     svg: false,
     center: false,
     crosshair: false,
     adjustSizeToFitRadius: false,
   });
-  const genProps: GenProps = { n, alpha, mode: mode as GenMode, size, layers };
+  const genProps: GenProps = {
+    n,
+    alpha,
+    mode: mode as GenMode,
+    size,
+    layers,
+    twist,
+  };
   if (adjustSizeToFitRadius) {
     genProps.size -= radius * 2;
   }
