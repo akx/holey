@@ -66,7 +66,7 @@ function generateLatticePoints({
 }) {
   const points: PointArray = [];
   for (let layer = 0; layer < layers; layer++) {
-    const pointsPerLayer = 1 + layer * nPerLayer;
+    const pointsPerLayer = layer === 0 ? 1 : layer * nPerLayer;
     const angleStride = (2 * Math.PI) / pointsPerLayer;
     const radius = (layer * size) / (2 * layers);
     for (let i = 0; i < pointsPerLayer; i++) {
